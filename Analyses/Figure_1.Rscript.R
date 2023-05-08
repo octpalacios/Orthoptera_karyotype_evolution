@@ -1,8 +1,8 @@
 # Set working directory
-setwd("/Volumes/Seagate Exp/Backup_01_04_2017/Octavio/Octavio/VR_project/Manuscripts/Orthoptera_karyotype_evolution/Submission_Evol_letters/new_version/Review_Evolution_2/Figures")
+setwd("~/Desktop/Figures")
 
 # Read data
-Karyotype_and_FN <- read.delim("/Volumes/Seagate Exp/Backup_01_04_2017/Octavio/Octavio/VR_project/Manuscripts/Orthoptera_karyotype_evolution/Submission_Evol_letters/new_version/Review_Evolution_1/Files/Orthoptera_2n_NF.txt", header=TRUE)
+Karyotype_and_FN <- read.delim("Orthoptera_2n_NF.txt", header=TRUE)
 View(Karyotype_and_FN)
 
 library("ggplot2")
