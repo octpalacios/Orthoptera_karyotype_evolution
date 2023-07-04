@@ -1,5 +1,5 @@
 # Karyotype evolution and speciation in Orthoptera
-This repository contains data and code to reproduce analyses reported in the manuscript "Speciation and karyotype evolution in Orthoptera".
+This repository contains data and code to reproduce analyses reported in the manuscript "Karyotype evolution and speciation Orthoptera".
 
 # Repository structure
 Analyses: contains code to reproduce analyses, simulations and figures.
