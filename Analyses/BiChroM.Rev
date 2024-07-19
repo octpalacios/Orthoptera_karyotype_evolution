@@ -1,0 +1,205 @@
+#########################################################################################################
+#
+# RevBayes Chromosome Evolution Tutorial:
+# 
+# A BiChroM Analysis
+#
+#
+#
+# This is an example of how to test for an association of phenotype and chromosome number evolution
+# in RevBayes. Here we set up a binary phenotypic character and estimate separate rates of chromosome
+# evolution for each state of the phenotype. The model describes the joint evolution of both the
+# phenotypic character and chromosome evolution. This model (BiChroM) was introduced in Zenil‐Ferguson 
+# et al. (2017). In RevBayes the BiChroM model can easily be extended to multistate phenotypes and/or 
+# hidden states, plus cladogenetic changes could be incorporated into the model.
+#
+# We'll again use haplod n chromosome count data for the orthopterans
+#
+# For the phenotype we will examine flight and flightlessness orthopterans. We'll test for an association of this phenotype with changes in the rates of 
+# chromosome evolution.
+#
+# phenotype state 0 = flight orthoptera
+# phenotype state 1 = flightlessness orhtoptera
+#
+# In this example the phylogeny is assumed known.
+#
+#########################################################################################################
+
+
+#########################
+# Read in the data 
+#########################
+
+
+# Read in the phylogeny. In this example the phylogeny is assumed known.
+phylogeny <- readBranchLengthTrees("Orthoptera.treePL.trials.dated.rnds5-8.combined.tree")[1]
+
+# We need to limit the maximum number of chromosomes,
+# so here we just use the largest chromosome count plus 10.
+max_chromo = 39
+
+# Get the chromosome counts from a tab-delimited file.
+chromo_data = readCharacterDataDelimited("Orthoptera.kn.male_phenotype_24_04_2024_mod.BiChroM.txt", stateLabels=2*(max_chromo + 1), type="NaturalNumbers", delimiter="\t", headers=FALSE)
+
+
+#########################
+# Chromosome Model
+#########################
+
+
+# We'll use exponential priors to model the rates of polyploidy and 
+# dysploidy events along the branches of the phylogeny
+
+# Here we set up two rate parameters for each type of chromosome change --
+# one for phenotype state 0 and one for phenotype state 1
+
+# rate of chromosome gains
+gamma_0 ~ dnExponential(10.0)
+gamma_1 ~ dnExponential(10.0)
+
+# rate of chromosome losses
+delta_0 ~ dnExponential(10.0)
+delta_1 ~ dnExponential(10.0)
+
+# rate of polyploidization
+#rho_0 ~ dnExponential(10.0)
+#rho_1 ~ dnExponential(10.0)
+
+# Add MCMC moves for each of the rates.
+mvi = 1
+moves[mvi++] = mvScale(gamma_0, lambda=1, weight=1) 
+moves[mvi++] = mvScale(delta_0, lambda=1, weight=1) 
+#moves[mvi++] = mvScale(rho_0, lambda=1, weight=1) 
+moves[mvi++] = mvScale(gamma_1, lambda=1, weight=1) 
+moves[mvi++] = mvScale(delta_1, lambda=1, weight=1) 
+#moves[mvi++] = mvScale(rho_1, lambda=1, weight=1) 
+
+# Now we create the rate matrix for the chromosome evolution model.
+# We will set up two rate matrices, one for each phenotype state.
+
+# We will use a simple ChromEvol model that includes
+# only the rate of chromosome gain, loss, and polyploidization.
+Q_0 := fnChromosomes(max_chromo, gamma_0, delta_0) #rho_0)
+Q_1 := fnChromosomes(max_chromo, gamma_1, delta_1) #rho_1)
+
+# Parameters for demi-polyploidization and rate modifiers could also
+# be added at this step for more complex models. For example we
+# could have included the rate of demi-polyploidization like this:
+# Q := fnChromosomes(max_chromo, gamma, delta, rho, eta)
+
+# Now we create the rates of transitioning between phenotype states:
+q_01 ~ dnExponential(10.0)
+q_10 ~ dnExponential(10.0)
+moves[mvi++] = mvScale(q_01, lambda=1, weight=1) 
+moves[mvi++] = mvScale(q_10, lambda=1, weight=1) 
+
+# And finally we create the transition rate matrix for the joint
+# model of phenotypic and chromosome evolution.
+
+# First we will initialize the matrix with all zeros:
+s = Q_0[1].size()
+for (i in 1:(2 * s)) {
+    for (j in 1:(2 * s)) {
+        Q[i][j] := 0.0
+    }
+}
+
+# And now populate the matrix with transition rates:
+for (i in 1:(2 * s)) {
+    for (j in 1:(2 * s)) {
+        if (i <= s) {
+            if (j <= s) {
+                if (i != j) {
+                    # chromosome changes within phenotype state 0
+                    Q[i][j] := abs(Q_0[i][j])
+                }
+            } else {
+                if (i == (j - s)) {
+                    # transition from phenotype state 0 to 1
+                    Q[i][j] := q_01
+                }
+            }
+        } else {
+            if (j <= s) { 
+                if (i == (j + s)) {
+                    # transition from phenotype state 1 to 0
+                    Q[i][j] := q_10
+                }
+            } else {
+                if (i != j) {
+                    # chromosome changes within phenotype state 1
+                    k = i - s
+                    l = j - s
+                    Q[i][j] := abs(Q_1[k][l])
+                }
+            }
+        }
+    }
+}
+Q_b := fnFreeK(Q, rescaled=false)
+
+# Here we assume the frequency of chromosome numbers at the root of the tree
+# are equal. Alternatively, you may want to treat the root frequencies
+# as a free variable and estimate them from the observed data (we discuss this elsewhere).
+root_frequencies := simplex(rep(1, 2 * s))
+
+# Now create the stochastic node for the chromosome evolution continuous-time Markov chain (CTMC).
+chromo_ctmc ~ dnPhyloCTMC(Q=Q_b, tree=phylogeny, rootFreq=root_frequencies, type="NaturalNumbers")
+
+# and clamp the observed chromosome counts data.
+chromo_ctmc.clamp(chromo_data)
+
+# Finally we wrap our model into a single model object.
+mymodel = model(phylogeny)
+
+
+#########################
+# MCMC
+#########################
+
+
+# Create the MCMC monitors:
+# First, a screen monitor with some useful variables:
+monitors[1] = mnScreen(printgen=100)
+
+# The ancestral state monitor for sampling ancestral states:
+monitors[2] = mnJointConditionalAncestralState(filename="output.200000/BiChroM_anc_states.log", printgen=100, tree=phylogeny, ctmc=chromo_ctmc, type="NaturalNumbers")
+
+# And another monitor for all the model variables:
+monitors[3] = mnModel(filename="output.200000/BiChroM_model.log", printgen=100)
+
+# Now set up the MCMC.
+# nruns = the number of replicate analyses (default 1).
+# # combine = How should we combine the traces once the simulation is finished (default none; options: sequential|mixed|none).
+mymcmc = mcmc(mymodel, monitors, moves, nruns=20, combine="mixed")
+
+# Run the MCMC. Note that for a real analysis you'd want to run many more 
+# iterations and check for convergence.
+mymcmc.run(100000) # default 200
+
+
+#########################
+# Summarize the results 
+#########################
+
+
+# Now let's summarize the sampled ancestral chromosome numbers.
+# First, read in the ancestral state trace:
+anc_state_trace = readAncestralStateTrace("output.200000/BiChroM_anc_states.log")
+
+# Finally, summarize the values from the traces over the phylogeny.
+# Here we do a marginal reconstruction of the ancestral states, discarding the first 25% of samples
+# as burnin.
+ancestralStateTree(phylogeny, anc_state_trace, "output.200000/BiChroM_final.tree", burnin=0.25, reconstruction="marginal")
+
+
+#########################################################################################################
+#
+# Open BiChroM_final.tree in FigTree and look at the ancestral state node labels.
+# The 3 states with the highest posterior probabilities are given, along with their marginal
+# posterior probabilities.
+#
+# Finally, you could use the RevGadgets R package to generate a PDF plot of the ancestral states
+# like in the other examples (see plot_BiChroM.R).
+#
+#########################################################################################################
